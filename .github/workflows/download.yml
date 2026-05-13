@@ -4,71 +4,65 @@ on:
   workflow_dispatch:
     inputs:
       urls:
-        description: 'لینک(ها) - برای چند لینک با فاصله جدا کنید'
+        description: 'لینک(ها) - با فاصله جدا کنید'
         required: true
         default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
       quality:
-        description: 'کیفیت ویدیو (best, 720, 480, 360, worst)'
+        description: 'کیفیت (best, 720, 480, 360, worst)'
         required: false
         default: 'worst'
       password:
-        description: 'رمز فایل ZIP (اختیاری)'
+        description: 'رمز ZIP (اختیاری)'
         required: false
         default: ''
 
 jobs:
-  download-and-split:
+  download:
     runs-on: ubuntu-latest
     steps:
-      - name: 1️⃣ چک کردن کدهای ریپازیتوری
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 2️⃣ نصب Deno (برای حل جاوااسکریپت یوتیوب)
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: 3️⃣ نصب ابزارهای مورد نیاز
+      - name: نصب yt-dlp با پشتیبانی EJS
         run: |
           sudo apt update
-          sudo apt install -y aria2 zip unzip
-          pip install yt-dlp
+          sudo apt install -y aria2 zip
+          pip install yt-dlp yt-dlp-ejs
 
-      - name: 4️⃣ دانلود فایل‌ها (تشخیص خودکار لینک یوتیوب)
+      - name: دانلود ویدیو با EJS
         run: |
           mkdir -p downloads
-          IFS=' ' read -ra URL_ARRAY <<< "${{ github.event.inputs.urls }}"
-          for url in "${URL_ARRAY[@]}"; do
-            echo "در حال پردازش: $url"
+          for url in ${{ github.event.inputs.urls }}; do
             if [[ $url == *"youtube.com"* || $url == *"youtu.be"* ]]; then
-              echo "لینک یوتیوب تشخیص داده شد"
-              yt-dlp -f "${{ github.event.inputs.quality }}" \
-                     --js-runtimes deno \
-                     --output "downloads/%(title)s.%(ext)s" \
-                     "$url"
+              echo "لینک یوتیوب: $url"
+              python3 -c "
+import yt_dlp
+ydl_opts = {
+    'format': '${{ github.event.inputs.quality }}',
+    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'compat_opts': ['no-js-runtime'],
+}
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    ydl.download(['$url'])
+"
             else
-              echo "لینک معمولی"
-              aria2c -x 16 -s 16 -d downloads --out="downloaded_$(date +%s).tmp" "$url"
+              aria2c -x 16 -d downloads -o "file_$(date +%s).tmp" "$url"
             fi
           done
 
-      - name: 5️⃣ تبدیل هر فایل به ZIP چند قسمتی (90 مگابایت)
+      - name: تبدیل به ZIP 90MB
         run: |
           mkdir -p final_zips
           for file in downloads/*; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              clean_name="${filename%.tmp}"
-              echo "Zipping $filename به قطعات 90MB"
-              zip -s 90m -P "${{ github.event.inputs.password }}" "final_zips/${clean_name}.zip" "$file"
-            fi
+            [ -f "$file" ] || continue
+            base=$(basename "$file")
+            zip -s 90m -P "${{ github.event.inputs.password }}" "final_zips/${base}.zip" "$file"
           done
           rm -rf downloads
 
-      - name: 6️⃣ آپلود قطعات به ریپازیتوری
+      - name: آپلود به ریپازیتوری
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add final_zips/
-          git commit -m "افزودن فایل دانلود شده (قطعات 90MB)" || echo "هیچ تغییری"
+          git commit -m "دانلود شده" || echo "No change"
           git push
