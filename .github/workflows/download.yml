@@ -6,11 +6,11 @@ on:
       urls:
         description: 'لینک(ها) - برای چند لینک با فاصله جدا کنید'
         required: true
-        default: 'https://example.com/file.zip'
+        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
       quality:
-        description: 'کیفیت ویدیو (فقط برای یوتیوب: best, 720, 480, worst)'
+        description: 'کیفیت ویدیو (best, 720, 480, 360, worst)'
         required: false
-        default: 'best'
+        default: 'worst'
       password:
         description: 'رمز فایل ZIP (اختیاری)'
         required: false
@@ -23,13 +23,18 @@ jobs:
       - name: 1️⃣ چک کردن کدهای ریپازیتوری
         uses: actions/checkout@v4
 
-      - name: 2️⃣ نصب ابزارهای مورد نیاز
+      - name: 2️⃣ نصب Deno (برای حل جاوااسکریپت یوتیوب)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: 3️⃣ نصب ابزارهای مورد نیاز
         run: |
           sudo apt update
           sudo apt install -y aria2 zip unzip
           pip install yt-dlp
 
-      - name: 3️⃣ دانلود فایل‌ها (تشخیص خودکار لینک یوتیوب)
+      - name: 4️⃣ دانلود فایل‌ها (تشخیص خودکار لینک یوتیوب)
         run: |
           mkdir -p downloads
           IFS=' ' read -ra URL_ARRAY <<< "${{ github.event.inputs.urls }}"
@@ -38,6 +43,7 @@ jobs:
             if [[ $url == *"youtube.com"* || $url == *"youtu.be"* ]]; then
               echo "لینک یوتیوب تشخیص داده شد"
               yt-dlp -f "${{ github.event.inputs.quality }}" \
+                     --js-runtimes deno \
                      --output "downloads/%(title)s.%(ext)s" \
                      "$url"
             else
@@ -46,13 +52,12 @@ jobs:
             fi
           done
 
-      - name: 4️⃣ تبدیل هر فایل به ZIP چند قسمتی (90 مگابایت)
+      - name: 5️⃣ تبدیل هر فایل به ZIP چند قسمتی (90 مگابایت)
         run: |
           mkdir -p final_zips
           for file in downloads/*; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
-              # حذف پسوند .tmp در صورت وجود
               clean_name="${filename%.tmp}"
               echo "Zipping $filename به قطعات 90MB"
               zip -s 90m -P "${{ github.event.inputs.password }}" "final_zips/${clean_name}.zip" "$file"
@@ -60,7 +65,7 @@ jobs:
           done
           rm -rf downloads
 
-      - name: 5️⃣ آپلود قطعات به ریپازیتوری
+      - name: 6️⃣ آپلود قطعات به ریپازیتوری
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
