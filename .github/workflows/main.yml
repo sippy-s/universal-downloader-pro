@@ -1,0 +1,68 @@
+name: Universal Downloader Pro (UDP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'لینک(ها) - با فاصله جدا کنید'
+        required: true
+        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+      quality:
+        description: 'کیفیت (best, 720, 480, 360, worst)'
+        required: false
+        default: 'worst'
+      password:
+        description: 'رمز ZIP (اختیاری)'
+        required: false
+        default: ''
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: نصب yt-dlp با پشتیبانی EJS
+        run: |
+          sudo apt update
+          sudo apt install -y aria2 zip
+          pip install yt-dlp yt-dlp-ejs
+
+      - name: دانلود ویدیو با EJS
+        run: |
+          mkdir -p downloads
+          for url in ${{ github.event.inputs.urls }}; do
+            if [[ $url == *"youtube.com"* || $url == *"youtu.be"* ]]; then
+              echo "لینک یوتیوب: $url"
+              python3 -c "
+import yt_dlp
+ydl_opts = {
+    'format': '${{ github.event.inputs.quality }}',
+    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'compat_opts': ['no-js-runtime'],
+}
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    ydl.download(['$url'])
+"
+            else
+              aria2c -x 16 -d downloads -o "file_$(date +%s).tmp" "$url"
+            fi
+          done
+
+      - name: تبدیل به ZIP 90MB
+        run: |
+          mkdir -p final_zips
+          for file in downloads/*; do
+            [ -f "$file" ] || continue
+            base=$(basename "$file")
+            zip -s 90m -P "${{ github.event.inputs.password }}" "final_zips/${base}.zip" "$file"
+          done
+          rm -rf downloads
+
+      - name: آپلود به ریپازیتوری
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add final_zips/
+          git commit -m "دانلود شده" || echo "No change"
+          git push
